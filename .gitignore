@@ -9,3 +9,15 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+
+# Generated Prisma Client
+server/generated/
+
+# Generated Prisma skills
+server/.agents/
+server/.claude/
+server/.cursor/
+server/.devin/
+
+# Temporary database verification
+server/verify-seed.sql

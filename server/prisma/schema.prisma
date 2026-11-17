@@ -1,0 +1,206 @@
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  CITIZEN
+  ADMIN
+}
+
+enum ReportStatus {
+  SUBMITTED
+  AI_PROCESSING
+  PENDING_VERIFICATION
+  VERIFIED_AND_ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+  DUPLICATE
+}
+
+enum IssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AIAnalysisStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum NotificationType {
+  STATUS_UPDATE
+  REPORT_VERIFIED
+  REPORT_REJECTED
+  REPORT_RESOLVED
+  GENERAL
+}
+
+enum AuditAction {
+  REPORT_VERIFIED
+  REPORT_CORRECTED
+  REPORT_REJECTED
+  REPORT_MARKED_DUPLICATE
+  STATUS_CHANGED
+  ROUTING_RULE_CREATED
+  ROUTING_RULE_UPDATED
+  USER_UPDATED
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  email        String   @unique
+  passwordHash String
+  phone        String?
+  role         UserRole @default(CITIZEN)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reports       Report[]
+  notifications Notification[]
+  auditLogs     AuditLog[] @relation("AuditActor")
+}
+
+model Department {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  routingRules RoutingRule[]
+  reports      Report[]
+}
+
+model IssueCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  reports      Report[]
+  routingRules RoutingRule[]
+}
+
+model Report {
+  id              String       @id @default(uuid()) @db.Uuid
+  trackingCode    String       @unique
+  description     String
+  imageUrl        String
+  latitude        Float
+  longitude       Float
+  locationAddress String?
+  status          ReportStatus @default(SUBMITTED)
+  verifiedSeverity IssueSeverity?
+  verificationNotes String?
+  isPublicLocationApproximate Boolean @default(true)
+
+  citizenId       String       @db.Uuid
+  categoryId      String?      @db.Uuid
+  departmentId    String?      @db.Uuid
+  duplicateOfId   String?      @db.Uuid
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  verifiedAt      DateTime?
+  resolvedAt      DateTime?
+
+  citizen         User          @relation(fields: [citizenId], references: [id])
+  category        IssueCategory? @relation(fields: [categoryId], references: [id])
+  department      Department?   @relation(fields: [departmentId], references: [id])
+  duplicateOf     Report?       @relation("ReportDuplicates", fields: [duplicateOfId], references: [id])
+  duplicates      Report[]      @relation("ReportDuplicates")
+
+  aiAnalyses      AIAnalysis[]
+  statusHistory   StatusHistory[]
+
+  @@index([citizenId])
+  @@index([status])
+  @@index([categoryId])
+  @@index([departmentId])
+  @@index([createdAt])
+}
+
+model AIAnalysis {
+  id             String           @id @default(uuid()) @db.Uuid
+  reportId       String           @db.Uuid
+  suggestedCategory String
+  suggestedSeverity IssueSeverity
+  confidence     Float
+  rationale      String?
+  status         AIAnalysisStatus @default(PENDING)
+  modelName      String?
+  createdAt      DateTime         @default(now())
+
+  report         Report           @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+}
+
+model StatusHistory {
+  id          String       @id @default(uuid()) @db.Uuid
+  reportId    String       @db.Uuid
+  oldStatus   ReportStatus?
+  newStatus   ReportStatus
+  remarks     String?
+  changedBy   String?      @db.Uuid
+  createdAt   DateTime     @default(now())
+
+  report      Report       @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+}
+
+model RoutingRule {
+  id          String   @id @default(uuid()) @db.Uuid
+  categoryId  String   @db.Uuid
+  departmentId String  @db.Uuid
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category    IssueCategory @relation(fields: [categoryId], references: [id])
+  department  Department    @relation(fields: [departmentId], references: [id])
+
+  @@unique([categoryId, departmentId])
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @db.Uuid
+  title     String
+  message   String
+  type      NotificationType
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+model AuditLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  actorId   String?     @db.Uuid
+  action    AuditAction
+  entityType String
+  entityId  String
+  details   Json?
+  createdAt DateTime    @default(now())
+
+  actor     User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+}
