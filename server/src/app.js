@@ -22,6 +22,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 // Authentication routes
 app.use("/api/auth", require("./routes/authRoutes"));
+
+
 // Health check endpoint
 app.get("/api/health", (req, res) => {
   res.status(200).json({
