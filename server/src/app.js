@@ -23,6 +23,9 @@ app.use(morgan("dev"));
 // Authentication routes
 app.use("/api/auth", require("./routes/authRoutes"));
 
+// Citizen reports routes
+app.use("/api/reports", require("./routes/reportRoutes"));
+
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {

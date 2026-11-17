@@ -21,3 +21,6 @@ server/.devin/
 
 # Temporary database verification
 server/verify-seed.sql
+
+# Local test images
+images/
