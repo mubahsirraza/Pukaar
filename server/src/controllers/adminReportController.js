@@ -727,11 +727,171 @@ const markReportAsDuplicate = async (req, res) => {
 };
 
 
+const updateReportStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, remarks } = req.body;
+
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (!uuidRegex.test(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid report ID is required.",
+      });
+    }
+
+    if (!["IN_PROGRESS", "RESOLVED"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Status must be IN_PROGRESS or RESOLVED.",
+      });
+    }
+
+    const statusRemarks =
+      typeof remarks === "string" ? remarks.trim() : "";
+
+    if (statusRemarks.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        message: "Remarks cannot exceed 1000 characters.",
+      });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const report = await tx.report.findUnique({
+        where: { id },
+      });
+
+      if (!report) {
+        const error = new Error("Report not found.");
+        error.code = "NOT_FOUND";
+        throw error;
+      }
+
+      // Only verified and assigned reports can enter IN_PROGRESS.
+      if (
+        status === "IN_PROGRESS" &&
+        report.status !== "VERIFIED_AND_ASSIGNED"
+      ) {
+        const error = new Error(
+          "Only verified and assigned reports can be moved to IN_PROGRESS."
+        );
+        error.code = "INVALID_STATUS";
+        throw error;
+      }
+
+      // Only reports currently in progress can be resolved.
+      if (
+        status === "RESOLVED" &&
+        report.status !== "IN_PROGRESS"
+      ) {
+        const error = new Error(
+          "Only reports currently IN_PROGRESS can be marked as RESOLVED."
+        );
+        error.code = "INVALID_STATUS";
+        throw error;
+      }
+
+      const updatedReport = await tx.report.update({
+        where: { id },
+        data: {
+          status,
+          ...(status === "RESOLVED"
+            ? { resolvedAt: new Date() }
+            : {}),
+        },
+        include: {
+          citizen: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          category: true,
+          department: true,
+        },
+      });
+
+      await tx.statusHistory.create({
+        data: {
+          reportId: id,
+          oldStatus: report.status,
+          newStatus: status,
+          remarks: statusRemarks || null,
+          changedBy: req.user.id,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId: req.user.id,
+          action: "STATUS_CHANGED",
+          entityType: "Report",
+          entityId: id,
+          details: {
+            trackingCode: report.trackingCode,
+            oldStatus: report.status,
+            newStatus: status,
+            remarks: statusRemarks || null,
+          },
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          userId: report.citizenId,
+          title:
+            status === "RESOLVED"
+              ? "Your report has been resolved"
+              : "Your report is now in progress",
+          message:
+            status === "RESOLVED"
+              ? `Your report ${report.trackingCode} has been marked as resolved.`
+              : `Work has started on your report ${report.trackingCode}.`,
+          type:
+            status === "RESOLVED"
+              ? "REPORT_RESOLVED"
+              : "STATUS_UPDATE",
+        },
+      });
+
+      return updatedReport;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message:
+        status === "RESOLVED"
+          ? "Report marked as resolved successfully."
+          : "Report moved to IN_PROGRESS successfully.",
+      report: result,
+    });
+  } catch (error) {
+    console.error("Update report status error:", error);
+
+    const statusCodes = {
+      NOT_FOUND: 404,
+      INVALID_STATUS: 400,
+    };
+
+    return res.status(statusCodes[error.code] || 500).json({
+      success: false,
+      message: error.message || "Failed to update report status.",
+    });
+  }
+};
+
+
 module.exports = {
   getAllReports,
   getAdminReportById,
   verifyReport,
   rejectReport,
   markReportAsDuplicate,
+  updateReportStatus,
+
 
 };

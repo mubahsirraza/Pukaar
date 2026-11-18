@@ -6,6 +6,8 @@ const {
   verifyReport,
   rejectReport,
   markReportAsDuplicate,
+  updateReportStatus,
+
 
 } = require("../controllers/adminReportController");
 
@@ -32,5 +34,7 @@ router.patch("/reports/:id/verify", verifyReport);
 router.patch("/reports/:id/reject", rejectReport);
 
 router.patch("/reports/:id/duplicate", markReportAsDuplicate);
+
+router.patch("/reports/:id/status", updateReportStatus);
 
 module.exports = router;
