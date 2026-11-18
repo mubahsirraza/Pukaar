@@ -33,6 +33,8 @@ app.use("/api/notifications", require("./routes/notificationRoutes"));
 
 app.use("/api/admin/departments", require("./routes/departmentRoutes"));
 
+app.use("/api/admin/categories", require("./routes/categoryRoutes"));
+
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
