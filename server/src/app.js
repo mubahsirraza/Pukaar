@@ -26,6 +26,9 @@ app.use("/api/auth", require("./routes/authRoutes"));
 // Citizen reports routes
 app.use("/api/reports", require("./routes/reportRoutes"));
 
+// Administrator report management routes
+app.use("/api/admin", require("./routes/adminReportRoutes"));
+
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
