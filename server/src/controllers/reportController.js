@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const { prisma } = require("../config/db");
 const uploadToCloudinary = require("../utils/uploadToCloudinary");
 const cloudinary = require("../config/cloudinary");
+const { classifyIssue } = require("../services/aiClassificationService");
 
 // Check the actual image signature, not just its MIME type.
 const isValidImage = (buffer) => {
@@ -15,10 +16,9 @@ const isValidImage = (buffer) => {
     buffer[2] === 0xff;
 
   // PNG
-  const isPNG =
-    buffer.subarray(0, 8).equals(
-      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
-    );
+  const isPNG = buffer.subarray(0, 8).equals(
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  );
 
   // WEBP
   const isWEBP =
@@ -36,9 +36,10 @@ const generateTrackingCode = () => {
     .toUpperCase()}`;
 };
 
-// Submit a new citizen report.
+// Submit a new citizen report and perform AI classification.
 const createReport = async (req, res) => {
   let uploadedImage = null;
+  let reportSaved = false;
 
   try {
     const { description, latitude, longitude, locationAddress } =
@@ -52,7 +53,8 @@ const createReport = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Description is required and must not exceed 2000 characters.",
+        message:
+          "Description is required and must not exceed 2000 characters.",
       });
     }
 
@@ -90,7 +92,8 @@ const createReport = async (req, res) => {
     if (!isValidImage(req.file.buffer)) {
       return res.status(400).json({
         success: false,
-        message: "The uploaded file is not a valid JPG, PNG, or WEBP image.",
+        message:
+          "The uploaded file is not a valid JPG, PNG, or WEBP image.",
       });
     }
 
@@ -99,7 +102,7 @@ const createReport = async (req, res) => {
 
     const trackingCode = generateTrackingCode();
 
-    // Save report and initial status history together.
+    // Save report, initial status history and pending AI analysis.
     const report = await prisma.$transaction(async (tx) => {
       const newReport = await tx.report.create({
         data: {
@@ -112,11 +115,12 @@ const createReport = async (req, res) => {
             typeof locationAddress === "string"
               ? locationAddress.trim().slice(0, 300) || null
               : null,
-          status: "SUBMITTED",
+          status: "AI_PROCESSING",
           citizenId: req.user.id,
         },
       });
 
+      // Record initial submission.
       await tx.statusHistory.create({
         data: {
           reportId: newReport.id,
@@ -127,12 +131,136 @@ const createReport = async (req, res) => {
         },
       });
 
-      return newReport;
+      // Record transition to AI processing.
+      await tx.statusHistory.create({
+        data: {
+          reportId: newReport.id,
+          oldStatus: "SUBMITTED",
+          newStatus: "AI_PROCESSING",
+          remarks: "AI classification has started.",
+          changedBy: null,
+        },
+      });
+
+      // Create pending AI analysis record.
+      const aiAnalysis = await tx.aIAnalysis.create({
+        data: {
+          reportId: newReport.id,
+          suggestedCategory: "Pending classification",
+          suggestedSeverity: "LOW",
+          confidence: 0,
+          rationale: "AI analysis is pending.",
+          status: "PENDING",
+        },
+      });
+
+      return {
+        ...newReport,
+        aiAnalysisId: aiAnalysis.id,
+      };
     });
 
+    // The report is safely stored.
+    // Do not delete it if AI classification fails.
+    reportSaved = true;
+
+    let aiResult = null;
+    let aiFailed = false;
+
+    // Perform Gemini classification.
+    try {
+      aiResult = await classifyIssue({
+        imageUrl: report.imageUrl,
+        description: report.description,
+      });
+
+      // Save AI result and move report to human verification.
+      await prisma.$transaction(async (tx) => {
+        await tx.aIAnalysis.update({
+          where: {
+            id: report.aiAnalysisId,
+          },
+          data: {
+            suggestedCategory: aiResult.suggestedCategory,
+            suggestedSeverity: aiResult.suggestedSeverity,
+            confidence: aiResult.confidence,
+            rationale: aiResult.rationale,
+            modelName: aiResult.modelName,
+            status: "COMPLETED",
+          },
+        });
+
+        await tx.report.update({
+          where: {
+            id: report.id,
+          },
+          data: {
+            status: "PENDING_VERIFICATION",
+          },
+        });
+
+        await tx.statusHistory.create({
+          data: {
+            reportId: report.id,
+            oldStatus: "AI_PROCESSING",
+            newStatus: "PENDING_VERIFICATION",
+            remarks:
+              "AI classification completed. Awaiting administrator verification.",
+            changedBy: null,
+          },
+        });
+      });
+    } catch (aiError) {
+      aiFailed = true;
+
+      console.error(
+        "AI classification failed:",
+        aiError.status || "",
+        aiError.message
+      );
+
+      // Preserve the report and send it for manual review.
+      await prisma.$transaction(async (tx) => {
+        await tx.aIAnalysis.update({
+          where: {
+            id: report.aiAnalysisId,
+          },
+          data: {
+            status: "FAILED",
+            rationale:
+              "AI classification failed. Manual administrator review is required.",
+          },
+        });
+
+        await tx.report.update({
+          where: {
+            id: report.id,
+          },
+          data: {
+            status: "PENDING_VERIFICATION",
+          },
+        });
+
+        await tx.statusHistory.create({
+          data: {
+            reportId: report.id,
+            oldStatus: "AI_PROCESSING",
+            newStatus: "PENDING_VERIFICATION",
+            remarks:
+              "AI classification unavailable. Report sent for manual verification.",
+            changedBy: null,
+          },
+        });
+      });
+    }
+
+    // Return the saved report and AI result.
     return res.status(201).json({
       success: true,
-      message: "Your report has been submitted successfully.",
+      message: aiFailed
+        ? "Your report was submitted successfully. It will be reviewed manually."
+        : "Your report was submitted and AI classification completed. It is awaiting administrator verification.",
+
       report: {
         id: report.id,
         trackingCode: report.trackingCode,
@@ -141,15 +269,28 @@ const createReport = async (req, res) => {
         latitude: report.latitude,
         longitude: report.longitude,
         locationAddress: report.locationAddress,
-        status: report.status,
+        status: "PENDING_VERIFICATION",
         createdAt: report.createdAt,
       },
+
+      aiAnalysis: aiResult
+        ? {
+            suggestedCategory: aiResult.suggestedCategory,
+            suggestedSeverity: aiResult.suggestedSeverity,
+            confidence: aiResult.confidence,
+            rationale: aiResult.rationale,
+            status: "COMPLETED",
+          }
+        : {
+            status: "FAILED",
+            message: "Manual administrator review is required.",
+          },
     });
   } catch (error) {
     console.error("Report submission error:", error.message);
 
-    // Remove the uploaded image if database saving fails.
-    if (uploadedImage?.publicId) {
+    // Only remove the Cloudinary image if the report was never saved.
+    if (!reportSaved && uploadedImage?.publicId) {
       try {
         await cloudinary.uploader.destroy(uploadedImage.publicId);
       } catch (cleanupError) {
@@ -162,7 +303,9 @@ const createReport = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Report submission failed. Please try again.",
+      message: reportSaved
+        ? "Your report was saved, but processing encountered an error. Please contact the administrator."
+        : "Report submission failed. Please try again.",
     });
   }
 };
