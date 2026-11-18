@@ -31,6 +31,8 @@ app.use("/api/admin", require("./routes/adminReportRoutes"));
 
 app.use("/api/notifications", require("./routes/notificationRoutes"));
 
+app.use("/api/admin/departments", require("./routes/departmentRoutes"));
+
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
