@@ -37,6 +37,8 @@ app.use("/api/admin/categories", require("./routes/categoryRoutes"));
 
 app.use("/api/admin/routing-rules", require("./routes/routingRuleRoutes"));
 
+app.use("/api/admin/analytics", require("./routes/analyticsRoutes"));
+
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
