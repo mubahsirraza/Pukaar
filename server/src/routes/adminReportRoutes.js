@@ -5,6 +5,7 @@ const {
   getAdminReportById,
   verifyReport,
   rejectReport,
+  markReportAsDuplicate,
 
 } = require("../controllers/adminReportController");
 
@@ -29,5 +30,7 @@ router.patch("/reports/:id/verify", verifyReport);
 
 // Reject a report with a mandatory reason.
 router.patch("/reports/:id/reject", rejectReport);
+
+router.patch("/reports/:id/duplicate", markReportAsDuplicate);
 
 module.exports = router;

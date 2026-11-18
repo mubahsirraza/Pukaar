@@ -575,9 +575,163 @@ const rejectReport = async (req, res) => {
 };
 
 
+// Mark a report as a duplicate of another existing report.
+const markReportAsDuplicate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { originalReportId, remarks } = req.body;
+
+    // Validate report IDs.
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(originalReportId || "")
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid report IDs are required.",
+      });
+    }
+
+    if (id === originalReportId) {
+      return res.status(400).json({
+        success: false,
+        message: "A report cannot be marked as a duplicate of itself.",
+      });
+    }
+
+    const duplicateRemarks =
+      typeof remarks === "string" ? remarks.trim() : "";
+
+    if (duplicateRemarks.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        message: "Remarks cannot exceed 1000 characters.",
+      });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const report = await tx.report.findUnique({
+        where: { id },
+      });
+
+      if (!report) {
+        const error = new Error("Report not found.");
+        error.code = "NOT_FOUND";
+        throw error;
+      }
+
+      if (report.status !== "PENDING_VERIFICATION") {
+        const error = new Error(
+          "Only reports pending verification can be marked as duplicates."
+        );
+        error.code = "INVALID_STATUS";
+        throw error;
+      }
+
+      const originalReport = await tx.report.findUnique({
+        where: { id: originalReportId },
+      });
+
+      if (!originalReport) {
+        const error = new Error("Original report not found.");
+        error.code = "ORIGINAL_NOT_FOUND";
+        throw error;
+      }
+
+      if (
+        originalReport.status === "DUPLICATE" ||
+        originalReport.status === "REJECTED"
+      ) {
+        const error = new Error(
+          "The original report must not be rejected or another duplicate."
+        );
+        error.code = "INVALID_ORIGINAL";
+        throw error;
+      }
+
+      const updatedReport = await tx.report.update({
+        where: { id },
+        data: {
+          status: "DUPLICATE",
+          duplicateOfId: originalReportId,
+          verificationNotes: duplicateRemarks || "Marked as a duplicate report.",
+        },
+        include: {
+          citizen: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      await tx.statusHistory.create({
+        data: {
+          reportId: id,
+          oldStatus: report.status,
+          newStatus: "DUPLICATE",
+          remarks: duplicateRemarks || "Marked as a duplicate report.",
+          changedBy: req.user.id,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId: req.user.id,
+          action: "REPORT_MARKED_DUPLICATE",
+          entityType: "Report",
+          entityId: id,
+          details: {
+            trackingCode: report.trackingCode,
+            originalReportId,
+            originalTrackingCode: originalReport.trackingCode,
+            remarks: duplicateRemarks || null,
+          },
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          userId: report.citizenId,
+          title: "Your report has been marked as a duplicate",
+          message: `Your report ${report.trackingCode} has been linked to original report ${originalReport.trackingCode}.`,
+          type: "STATUS_UPDATE",
+        },
+      });
+
+      return updatedReport;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Report marked as duplicate successfully.",
+      report: result,
+    });
+  } catch (error) {
+    console.error("Mark duplicate report error:", error);
+
+    const statusCodes = {
+      NOT_FOUND: 404,
+      ORIGINAL_NOT_FOUND: 404,
+      INVALID_STATUS: 400,
+      INVALID_ORIGINAL: 400,
+    };
+
+    return res.status(statusCodes[error.code] || 500).json({
+      success: false,
+      message: error.message || "Failed to mark report as duplicate.",
+    });
+  }
+};
+
+
 module.exports = {
   getAllReports,
   getAdminReportById,
   verifyReport,
   rejectReport,
+  markReportAsDuplicate,
+
 };
