@@ -2,13 +2,12 @@ const express = require("express");
 
 const {
   getAllReports,
+  getReportsForMap,
   getAdminReportById,
   verifyReport,
   rejectReport,
   markReportAsDuplicate,
   updateReportStatus,
-
-
 } = require("../controllers/adminReportController");
 
 const {
@@ -27,8 +26,7 @@ router.use(protect, authorize("ADMIN"));
 
 // Get all reports with optional filters and pagination.
 router.get("/reports", getAllReports);
-
-// Get complete details of an individual report.
+router.get("/reports/map", getReportsForMap);
 router.get("/reports/:id", getAdminReportById);
 
 // Verify a report and assign it to the responsible department.

@@ -153,6 +153,55 @@ const getAllReports = async (req, res) => {
   }
 };
 
+
+// Get all reports with location information for the admin issue map.
+const getReportsForMap = async (req, res) => {
+  try {
+    const reports = await prisma.report.findMany({
+      select: {
+        id: true,
+        trackingCode: true,
+        description: true,
+        latitude: true,
+        longitude: true,
+        locationAddress: true,
+        status: true,
+        verifiedSeverity: true,
+        createdAt: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        department: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: reports.length,
+      reports,
+    });
+  } catch (error) {
+    console.error("Admin map reports error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to retrieve reports for the issue map.",
+    });
+  }
+};
+
+
 // Get complete details of an individual report for administrators.
 const getAdminReportById = async (req, res) => {
   try {
@@ -887,11 +936,10 @@ const updateReportStatus = async (req, res) => {
 
 module.exports = {
   getAllReports,
+  getReportsForMap,
   getAdminReportById,
   verifyReport,
   rejectReport,
   markReportAsDuplicate,
   updateReportStatus,
-
-
 };
