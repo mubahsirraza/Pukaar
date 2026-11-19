@@ -12,6 +12,10 @@ const {
 } = require("../controllers/adminReportController");
 
 const {
+  retryAIClassification,
+} = require("../controllers/aiRetryController");
+
+const {
   protect,
   authorize,
 } = require("../middleware/authMiddleware");
@@ -36,5 +40,8 @@ router.patch("/reports/:id/reject", rejectReport);
 router.patch("/reports/:id/duplicate", markReportAsDuplicate);
 
 router.patch("/reports/:id/status", updateReportStatus);
+
+// Retry AI classification for a report whose previous AI analysis failed.
+router.post("/reports/:id/retry-ai", retryAIClassification);
 
 module.exports = router;
