@@ -13,6 +13,11 @@ const {
   changePassword,
 } = require("../controllers/authController");
 
+const {
+  requestPasswordReset,
+  resetPassword,
+} = require("../controllers/passwordResetController");
+
 const { protect, authorize } = require("../middleware/authMiddleware");
 const { rateLimit } = require("express-rate-limit");
 const { validateRequest } = require("../middleware/validationMiddleware");
@@ -67,6 +72,68 @@ const loginValidation = [
     .notEmpty()
     .withMessage("Password cannot be empty."),
 ];
+
+// Password recovery validation
+const forgotPasswordValidation = [
+  body("email")
+    .trim()
+    .isEmail()
+    .withMessage("Please provide a valid email address.")
+    .normalizeEmail(),
+];
+
+const resetPasswordValidation = [
+  body("token")
+    .isString()
+    .withMessage("Reset token is required.")
+    .isLength({ min: 64, max: 64 })
+    .withMessage("Invalid reset token."),
+
+  body("newPassword")
+    .isString()
+    .withMessage("New password must be a string.")
+    .isLength({ min: 8, max: 128 })
+    .withMessage("Password must be between 8 and 128 characters."),
+];
+
+// Separate limits for password recovery.
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many reset requests. Please try again later.",
+  },
+});
+
+const resetPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many attempts. Please try again later.",
+  },
+});
+
+router.post(
+  "/forgot-password",
+  forgotPasswordLimiter,
+  forgotPasswordValidation,
+  validateRequest,
+  requestPasswordReset
+);
+
+router.post(
+  "/reset-password",
+  resetPasswordLimiter,
+  resetPasswordValidation,
+  validateRequest,
+  resetPassword
+);
 
 // Public routes
 router.post(
