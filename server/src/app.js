@@ -66,6 +66,8 @@ app.use("/api/reports", require("./routes/reportRoutes"));
 // Administrator report management routes
 app.use("/api/admin", require("./routes/adminReportRoutes"));
 
+app.use("/api/admin/citizens", require("./routes/adminCitizenRoutes"));
+
 app.use("/api/notifications", require("./routes/notificationRoutes"));
 
 app.use("/api/admin/departments", require("./routes/departmentRoutes"));

@@ -11,6 +11,7 @@ import Departments from "./pages/Departments";
 import IssueCategories from "./pages/IssueCategories";
 import RoutingRules from "./pages/RoutingRules";
 import Analytics from "./pages/Analytics";
+import Citizens from "./pages/Citizens";
 
 export default function App() {
   const [activePage, setActivePage] = useState("Overview");
@@ -113,11 +114,13 @@ export default function App() {
             <IssueCategories />
           ) : activePage === "Routing Rules" ? (
             <RoutingRules />
-          ) : activePage === "Analytics" ? (
-            <Analytics
-              onNavigateToReports={handleAnalyticsNavigateToReports}
-            />
-          ) : (
+         ) : activePage === "Analytics" ? (
+  <Analytics
+    onNavigateToReports={handleAnalyticsNavigateToReports}
+  />
+) : activePage === "Citizens" ? (
+  <Citizens />
+) : (
             <div className="dashboard-card rounded-xl border border-gray-100 bg-white p-8 shadow-sm">
               <h3 className="text-lg font-semibold text-[#10243E]">
                 {activePage}
