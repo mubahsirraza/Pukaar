@@ -10,10 +10,17 @@ import IssueMap from "./pages/IssueMap";
 import Departments from "./pages/Departments";
 import IssueCategories from "./pages/IssueCategories";
 import RoutingRules from "./pages/RoutingRules";
+import Analytics from "./pages/Analytics";
 
 export default function App() {
   const [activePage, setActivePage] = useState("Overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Shared filter request for Analytics -> All Reports navigation
+  const [reportFilter, setReportFilter] = useState({
+    status: "",
+    requestId: 0,
+  });
 
   const [user, setUser] = useState(() => {
     const token = localStorage.getItem("pukaarToken");
@@ -45,10 +52,30 @@ export default function App() {
     setUser(null);
     setActivePage("Overview");
     setSidebarOpen(false);
+    setReportFilter({ status: "", requestId: 0 });
   };
 
   const handlePageChange = (page) => {
     setActivePage(page);
+    setSidebarOpen(false);
+
+    // Opening All Reports directly from the sidebar clears
+    // any filter previously selected from Analytics.
+    if (page === "All Reports") {
+      setReportFilter((current) => ({
+        status: "",
+        requestId: current.requestId + 1,
+      }));
+    }
+  };
+
+  const handleAnalyticsNavigateToReports = (status = "") => {
+    setReportFilter((current) => ({
+      status,
+      requestId: current.requestId + 1,
+    }));
+
+    setActivePage("All Reports");
     setSidebarOpen(false);
   };
 
@@ -74,28 +101,32 @@ export default function App() {
         />
 
         <div className="p-4 sm:p-6 lg:p-8">
-         {activePage === "Overview" ? (
-  <Dashboard />
-) : activePage === "All Reports" ? (
-  <AllReports />
-) : activePage === "Issue Map" ? (
-  <IssueMap />
-  ) : activePage === "Departments" ? (
-  <Departments />
-) : activePage === "Issue Categories" ? (
-  <IssueCategories />
-  ) : activePage === "Routing Rules" ? (
-  <RoutingRules />
-) : (
-  <div className="dashboard-card rounded-xl border border-gray-100 bg-white p-8 shadow-sm">
-    <h3 className="text-lg font-semibold text-[#10243E]">
-      {activePage}
-    </h3>
-    <p className="mt-2 text-sm text-gray-500">
-      This module will be implemented in the next development phase.
-    </p>
-  </div>
-)}
+          {activePage === "Overview" ? (
+            <Dashboard />
+          ) : activePage === "All Reports" ? (
+            <AllReports filterRequest={reportFilter} />
+          ) : activePage === "Issue Map" ? (
+            <IssueMap />
+          ) : activePage === "Departments" ? (
+            <Departments />
+          ) : activePage === "Issue Categories" ? (
+            <IssueCategories />
+          ) : activePage === "Routing Rules" ? (
+            <RoutingRules />
+          ) : activePage === "Analytics" ? (
+            <Analytics
+              onNavigateToReports={handleAnalyticsNavigateToReports}
+            />
+          ) : (
+            <div className="dashboard-card rounded-xl border border-gray-100 bg-white p-8 shadow-sm">
+              <h3 className="text-lg font-semibold text-[#10243E]">
+                {activePage}
+              </h3>
+              <p className="mt-2 text-sm text-gray-500">
+                This module will be implemented in the next development phase.
+              </p>
+            </div>
+          )}
         </div>
       </main>
     </div>

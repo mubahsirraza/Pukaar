@@ -431,7 +431,7 @@ function ReportDetails({ report, onClose }) {
   );
 }
 
-export default function AllReports() {
+export default function AllReports({ filterRequest }) {
   const [reports, setReports] = useState([]);
   const [categories, setCategories] = useState([]);
 
@@ -501,6 +501,14 @@ export default function AllReports() {
   useEffect(() => {
     fetchCategories();
   }, []);
+
+  // Apply status filters requested from the Analytics page
+useEffect(() => {
+  setStatus(filterRequest?.status || "");
+  setPage(1);
+  setSearch("");
+  setCategoryId("");
+}, [filterRequest?.requestId]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
