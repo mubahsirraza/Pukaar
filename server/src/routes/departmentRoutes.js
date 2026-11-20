@@ -7,6 +7,7 @@ const {
   createDepartment,
   updateDepartment,
   updateDepartmentStatus,
+  deleteDepartment,
 } = require("../controllers/departmentController");
 
 const {
@@ -33,5 +34,8 @@ router.patch("/:id", updateDepartment);
 
 // Activate or deactivate a department.
 router.patch("/:id/status", updateDepartmentStatus);
+
+// Delete a department.
+router.delete("/:id", deleteDepartment);
 
 module.exports = router;

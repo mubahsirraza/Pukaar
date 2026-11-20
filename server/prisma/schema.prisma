@@ -43,6 +43,7 @@ enum NotificationType {
   GENERAL
 }
 
+
 enum AuditAction {
   REPORT_VERIFIED
   REPORT_CORRECTED
@@ -52,6 +53,12 @@ enum AuditAction {
   ROUTING_RULE_CREATED
   ROUTING_RULE_UPDATED
   USER_UPDATED
+
+  DEPARTMENT_CREATED
+  DEPARTMENT_UPDATED
+  DEPARTMENT_ACTIVATED
+  DEPARTMENT_DEACTIVATED
+  DEPARTMENT_DELETED
 }
 
 model User {
@@ -68,6 +75,7 @@ model User {
   reports       Report[]
   notifications Notification[]
   auditLogs     AuditLog[] @relation("AuditActor")
+  passwordResetTokens PasswordResetToken[]
 }
 
 model Department {
@@ -203,4 +211,18 @@ model AuditLog {
 
   @@index([actorId])
   @@index([entityType, entityId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }

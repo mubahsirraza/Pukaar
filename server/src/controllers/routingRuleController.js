@@ -2,15 +2,20 @@
 const { prisma } = require("../config/db");
 
 const isValidUUID = (id) =>
+  typeof id === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+const transactionOptions = {
+  isolationLevel: "Serializable",
+  maxWait: 5000,
+  timeout: 10000,
+};
 
 // Get all routing rules.
 const getAllRoutingRules = async (req, res) => {
   try {
     const rules = await prisma.routingRule.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
+      orderBy: { createdAt: "asc" },
       include: {
         category: true,
         department: true,
@@ -85,65 +90,74 @@ const createRoutingRule = async (req, res) => {
       });
     }
 
-    const [category, department] = await Promise.all([
-      prisma.issueCategory.findUnique({ where: { id: categoryId } }),
-      prisma.department.findUnique({ where: { id: departmentId } }),
-    ]);
+    const rule = await prisma.$transaction(async (tx) => {
+      const [category, department] = await Promise.all([
+        tx.issueCategory.findUnique({ where: { id: categoryId } }),
+        tx.department.findUnique({ where: { id: departmentId } }),
+      ]);
 
-    if (!category || !department) {
-      return res.status(404).json({
-        success: false,
-        message: "Category or department not found.",
+      if (!category || !department) {
+        const error = new Error("CATEGORY_OR_DEPARTMENT_NOT_FOUND");
+        throw error;
+      }
+
+      if (!category.isActive || !department.isActive) {
+        const error = new Error("INACTIVE_CATEGORY_OR_DEPARTMENT");
+        throw error;
+      }
+
+      const existingRule = await tx.routingRule.findUnique({
+        where: {
+          categoryId_departmentId: {
+            categoryId,
+            departmentId,
+          },
+        },
       });
-    }
 
-    if (!category.isActive || !department.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: "Only active categories and departments can be assigned.",
+      if (existingRule) {
+        const error = new Error("DUPLICATE_ROUTING_RULE");
+        throw error;
+      }
+
+      const activeRule = await tx.routingRule.findFirst({
+        where: {
+          categoryId,
+          isActive: true,
+        },
       });
-    }
 
-    const existingRule = await prisma.routingRule.findUnique({
-      where: {
-        categoryId_departmentId: {
+      if (activeRule) {
+        const error = new Error("CATEGORY_ALREADY_HAS_ACTIVE_RULE");
+        throw error;
+      }
+
+      const created = await tx.routingRule.create({
+        data: {
           categoryId,
           departmentId,
         },
-      },
-    });
-
-    if (existingRule) {
-      return res.status(409).json({
-        success: false,
-        message: "This category-to-department routing rule already exists.",
+        include: {
+          category: true,
+          department: true,
+        },
       });
-    }
 
-    const activeRule = await prisma.routingRule.findFirst({
-      where: {
-        categoryId,
-        isActive: true,
-      },
-    });
-
-    if (activeRule) {
-      return res.status(409).json({
-        success: false,
-        message: "This category already has an active routing rule. Deactivate or update it first.",
+      await tx.auditLog.create({
+        data: {
+          actorId: req.user?.id || null,
+          action: "ROUTING_RULE_CREATED",
+          entityType: "RoutingRule",
+          entityId: created.id,
+          details: {
+            categoryId,
+            departmentId,
+          },
+        },
       });
-    }
 
-    const rule = await prisma.routingRule.create({
-      data: {
-        categoryId,
-        departmentId,
-      },
-      include: {
-        category: true,
-        department: true,
-      },
-    });
+      return created;
+    }, transactionOptions);
 
     return res.status(201).json({
       success: true,
@@ -153,10 +167,36 @@ const createRoutingRule = async (req, res) => {
   } catch (error) {
     console.error("Create routing rule error:", error);
 
-    if (error.code === "P2002") {
+    if (error.message === "CATEGORY_OR_DEPARTMENT_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Category or department not found.",
+      });
+    }
+
+    if (error.message === "INACTIVE_CATEGORY_OR_DEPARTMENT") {
+      return res.status(400).json({
+        success: false,
+        message: "Only active categories and departments can be assigned.",
+      });
+    }
+
+    if (
+      error.message === "DUPLICATE_ROUTING_RULE" ||
+      error.message === "CATEGORY_ALREADY_HAS_ACTIVE_RULE" ||
+      error.code === "P2002"
+    ) {
       return res.status(409).json({
         success: false,
-        message: "This routing rule already exists.",
+        message:
+          "This category already has a matching rule or another active routing rule.",
+      });
+    }
+
+    if (error.code === "P2034") {
+      return res.status(409).json({
+        success: false,
+        message: "A concurrent change occurred. Please try again.",
       });
     }
 
@@ -187,23 +227,9 @@ const updateRoutingRule = async (req, res) => {
       });
     }
 
-    const currentRule = await prisma.routingRule.findUnique({
-      where: { id },
-    });
-
-    if (!currentRule) {
-      return res.status(404).json({
-        success: false,
-        message: "Routing rule not found.",
-      });
-    }
-
-    const newCategoryId = categoryId ?? currentRule.categoryId;
-    const newDepartmentId = departmentId ?? currentRule.departmentId;
-
     if (
-      !isValidUUID(newCategoryId) ||
-      !isValidUUID(newDepartmentId)
+      categoryId !== undefined && !isValidUUID(categoryId) ||
+      departmentId !== undefined && !isValidUUID(departmentId)
     ) {
       return res.status(400).json({
         success: false,
@@ -211,57 +237,84 @@ const updateRoutingRule = async (req, res) => {
       });
     }
 
-    const [category, department] = await Promise.all([
-      prisma.issueCategory.findUnique({
-        where: { id: newCategoryId },
-      }),
-      prisma.department.findUnique({
-        where: { id: newDepartmentId },
-      }),
-    ]);
-
-    if (!category || !department) {
-      return res.status(404).json({
-        success: false,
-        message: "Category or department not found.",
+    const rule = await prisma.$transaction(async (tx) => {
+      const currentRule = await tx.routingRule.findUnique({
+        where: { id },
       });
-    }
 
-    if (!category.isActive || !department.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: "Only active categories and departments can be assigned.",
-      });
-    }
+      if (!currentRule) {
+        const error = new Error("ROUTING_RULE_NOT_FOUND");
+        throw error;
+      }
 
-    if (currentRule.isActive) {
-      const conflictingRule = await prisma.routingRule.findFirst({
-        where: {
+      const newCategoryId = categoryId ?? currentRule.categoryId;
+      const newDepartmentId = departmentId ?? currentRule.departmentId;
+
+      const [category, department] = await Promise.all([
+        tx.issueCategory.findUnique({
+          where: { id: newCategoryId },
+        }),
+        tx.department.findUnique({
+          where: { id: newDepartmentId },
+        }),
+      ]);
+
+      if (!category || !department) {
+        const error = new Error("CATEGORY_OR_DEPARTMENT_NOT_FOUND");
+        throw error;
+      }
+
+      if (!category.isActive || !department.isActive) {
+        const error = new Error("INACTIVE_CATEGORY_OR_DEPARTMENT");
+        throw error;
+      }
+
+      // An active rule must not conflict with another active rule
+      // assigned to the same category.
+      if (currentRule.isActive) {
+        const conflictingRule = await tx.routingRule.findFirst({
+          where: {
+            categoryId: newCategoryId,
+            isActive: true,
+            NOT: { id },
+          },
+        });
+
+        if (conflictingRule) {
+          const error = new Error("CATEGORY_ALREADY_HAS_ACTIVE_RULE");
+          throw error;
+        }
+      }
+
+      const updated = await tx.routingRule.update({
+        where: { id },
+        data: {
           categoryId: newCategoryId,
-          isActive: true,
-          NOT: { id },
+          departmentId: newDepartmentId,
+        },
+        include: {
+          category: true,
+          department: true,
         },
       });
 
-      if (conflictingRule) {
-        return res.status(409).json({
-          success: false,
-          message: "This category already has another active routing rule.",
-        });
-      }
-    }
+      await tx.auditLog.create({
+        data: {
+          actorId: req.user?.id || null,
+          action: "ROUTING_RULE_UPDATED",
+          entityType: "RoutingRule",
+          entityId: id,
+          details: {
+            oldCategoryId: currentRule.categoryId,
+            oldDepartmentId: currentRule.departmentId,
+            newCategoryId,
+            newDepartmentId,
+          },
+        },
+      });
 
-    const rule = await prisma.routingRule.update({
-      where: { id },
-      data: {
-        categoryId: newCategoryId,
-        departmentId: newDepartmentId,
-      },
-      include: {
-        category: true,
-        department: true,
-      },
-    });
+      return updated;
+    }, transactionOptions);
 
     return res.status(200).json({
       success: true,
@@ -271,10 +324,41 @@ const updateRoutingRule = async (req, res) => {
   } catch (error) {
     console.error("Update routing rule error:", error);
 
-    if (error.code === "P2002") {
+    if (error.message === "ROUTING_RULE_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Routing rule not found.",
+      });
+    }
+
+    if (error.message === "CATEGORY_OR_DEPARTMENT_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Category or department not found.",
+      });
+    }
+
+    if (error.message === "INACTIVE_CATEGORY_OR_DEPARTMENT") {
+      return res.status(400).json({
+        success: false,
+        message: "Only active categories and departments can be assigned.",
+      });
+    }
+
+    if (
+      error.message === "CATEGORY_ALREADY_HAS_ACTIVE_RULE" ||
+      error.code === "P2002"
+    ) {
       return res.status(409).json({
         success: false,
-        message: "This routing rule already exists.",
+        message: "This category already has another active routing rule.",
+      });
+    }
+
+    if (error.code === "P2034") {
+      return res.status(409).json({
+        success: false,
+        message: "A concurrent change occurred. Please try again.",
       });
     }
 
@@ -305,57 +389,67 @@ const updateRoutingRuleStatus = async (req, res) => {
       });
     }
 
-    const rule = await prisma.routingRule.findUnique({
-      where: { id },
-    });
-
-    if (!rule) {
-      return res.status(404).json({
-        success: false,
-        message: "Routing rule not found.",
+    const updatedRule = await prisma.$transaction(async (tx) => {
+      const rule = await tx.routingRule.findUnique({
+        where: { id },
       });
-    }
 
-    if (isActive) {
-      const [category, department, existingRule] = await Promise.all([
-        prisma.issueCategory.findUnique({
-          where: { id: rule.categoryId },
-        }),
-        prisma.department.findUnique({
-          where: { id: rule.departmentId },
-        }),
-        prisma.routingRule.findFirst({
-          where: {
-            categoryId: rule.categoryId,
-            isActive: true,
-            NOT: { id },
+      if (!rule) {
+        const error = new Error("ROUTING_RULE_NOT_FOUND");
+        throw error;
+      }
+
+      if (isActive) {
+        const [category, department, existingRule] = await Promise.all([
+          tx.issueCategory.findUnique({
+            where: { id: rule.categoryId },
+          }),
+          tx.department.findUnique({
+            where: { id: rule.departmentId },
+          }),
+          tx.routingRule.findFirst({
+            where: {
+              categoryId: rule.categoryId,
+              isActive: true,
+              NOT: { id },
+            },
+          }),
+        ]);
+
+        if (!category?.isActive || !department?.isActive) {
+          const error = new Error("INACTIVE_CATEGORY_OR_DEPARTMENT");
+          throw error;
+        }
+
+        if (existingRule) {
+          const error = new Error("CATEGORY_ALREADY_HAS_ACTIVE_RULE");
+          throw error;
+        }
+      }
+
+      const updated = await tx.routingRule.update({
+        where: { id },
+        data: { isActive },
+        include: {
+          category: true,
+          department: true,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId: req.user?.id || null,
+          action: "ROUTING_RULE_UPDATED",
+          entityType: "RoutingRule",
+          entityId: id,
+          details: {
+            isActive,
           },
-        }),
-      ]);
+        },
+      });
 
-      if (!category?.isActive || !department?.isActive) {
-        return res.status(400).json({
-          success: false,
-          message: "Cannot activate a rule for an inactive category or department.",
-        });
-      }
-
-      if (existingRule) {
-        return res.status(409).json({
-          success: false,
-          message: "Another active routing rule already exists for this category.",
-        });
-      }
-    }
-
-    const updatedRule = await prisma.routingRule.update({
-      where: { id },
-      data: { isActive },
-      include: {
-        category: true,
-        department: true,
-      },
-    });
+      return updated;
+    }, transactionOptions);
 
     return res.status(200).json({
       success: true,
@@ -366,6 +460,36 @@ const updateRoutingRuleStatus = async (req, res) => {
     });
   } catch (error) {
     console.error("Update routing rule status error:", error);
+
+    if (error.message === "ROUTING_RULE_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Routing rule not found.",
+      });
+    }
+
+    if (error.message === "INACTIVE_CATEGORY_OR_DEPARTMENT") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cannot activate a rule for an inactive category or department.",
+      });
+    }
+
+    if (error.message === "CATEGORY_ALREADY_HAS_ACTIVE_RULE") {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Another active routing rule already exists for this category.",
+      });
+    }
+
+    if (error.code === "P2034") {
+      return res.status(409).json({
+        success: false,
+        message: "A concurrent change occurred. Please try again.",
+      });
+    }
 
     return res.status(500).json({
       success: false,

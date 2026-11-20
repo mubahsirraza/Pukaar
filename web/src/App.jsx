@@ -7,6 +7,9 @@ import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 import AllReports from "./pages/AllReports";
 import IssueMap from "./pages/IssueMap";
+import Departments from "./pages/Departments";
+import IssueCategories from "./pages/IssueCategories";
+import RoutingRules from "./pages/RoutingRules";
 
 export default function App() {
   const [activePage, setActivePage] = useState("Overview");
@@ -77,6 +80,12 @@ export default function App() {
   <AllReports />
 ) : activePage === "Issue Map" ? (
   <IssueMap />
+  ) : activePage === "Departments" ? (
+  <Departments />
+) : activePage === "Issue Categories" ? (
+  <IssueCategories />
+  ) : activePage === "Routing Rules" ? (
+  <RoutingRules />
 ) : (
   <div className="dashboard-card rounded-xl border border-gray-100 bg-white p-8 shadow-sm">
     <h3 className="text-lg font-semibold text-[#10243E]">
