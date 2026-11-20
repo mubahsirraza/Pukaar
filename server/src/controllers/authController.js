@@ -202,8 +202,166 @@ const getMe = async (req, res) => {
   });
 };
 
+// Update authenticated admin profile
+const updateProfile = async (req, res) => {
+  try {
+    const { name, email, phone } = req.body;
+
+    if (
+      typeof name !== "string" ||
+      typeof email !== "string"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Name and email are required.",
+      });
+    }
+
+    const normalizedName = name.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedName || normalizedName.length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Name must be between 1 and 100 characters.",
+      });
+    }
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailPattern.test(normalizedEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address.",
+      });
+    }
+
+    if (
+      phone !== undefined &&
+      phone !== null &&
+      typeof phone !== "string"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid phone number.",
+      });
+    }
+
+    const normalizedPhone =
+      typeof phone === "string" && phone.trim()
+        ? phone.trim()
+        : null;
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        name: normalizedName,
+        email: normalizedEmail,
+        phone: normalizedPhone,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully.",
+      user: safeUser(updatedUser),
+    });
+  } catch (error) {
+    console.error("Profile update error:", error.message);
+
+    if (error.code === "P2002") {
+      return res.status(409).json({
+        success: false,
+        message: "This email address is already in use.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update profile. Please try again.",
+    });
+  }
+};
+
+// Change authenticated user's password
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (
+      typeof currentPassword !== "string" ||
+      typeof newPassword !== "string" ||
+      !currentPassword ||
+      !newPassword
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password and new password are required.",
+      });
+    }
+
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be between 8 and 128 characters.",
+      });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be different from the current password.",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User account not found.",
+      });
+    }
+
+    const passwordMatches = await bcrypt.compare(
+      currentPassword,
+      user.passwordHash
+    );
+
+    if (!passwordMatches) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password is incorrect.",
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Password changed successfully.",
+    });
+  } catch (error) {
+    console.error("Password change error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to change password. Please try again.",
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   getMe,
+  updateProfile,
+  changePassword,
 };

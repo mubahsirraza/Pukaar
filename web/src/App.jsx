@@ -12,12 +12,12 @@ import IssueCategories from "./pages/IssueCategories";
 import RoutingRules from "./pages/RoutingRules";
 import Analytics from "./pages/Analytics";
 import Citizens from "./pages/Citizens";
+import Settings from "./pages/Settings";
 
 export default function App() {
   const [activePage, setActivePage] = useState("Overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Shared filter request for Analytics -> All Reports navigation
   const [reportFilter, setReportFilter] = useState({
     status: "",
     requestId: 0,
@@ -60,8 +60,6 @@ export default function App() {
     setActivePage(page);
     setSidebarOpen(false);
 
-    // Opening All Reports directly from the sidebar clears
-    // any filter previously selected from Analytics.
     if (page === "All Reports") {
       setReportFilter((current) => ({
         status: "",
@@ -78,6 +76,13 @@ export default function App() {
 
     setActivePage("All Reports");
     setSidebarOpen(false);
+  };
+
+  // Keep the dashboard header and localStorage synchronized
+  // after a successful profile update.
+  const handleUserUpdate = (updatedUser) => {
+    setUser(updatedUser);
+    localStorage.setItem("pukaarUser", JSON.stringify(updatedUser));
   };
 
   if (!user) {
@@ -114,13 +119,18 @@ export default function App() {
             <IssueCategories />
           ) : activePage === "Routing Rules" ? (
             <RoutingRules />
-         ) : activePage === "Analytics" ? (
-  <Analytics
-    onNavigateToReports={handleAnalyticsNavigateToReports}
-  />
-) : activePage === "Citizens" ? (
-  <Citizens />
-) : (
+          ) : activePage === "Analytics" ? (
+            <Analytics
+              onNavigateToReports={handleAnalyticsNavigateToReports}
+            />
+          ) : activePage === "Citizens" ? (
+            <Citizens />
+          ) : activePage === "Settings" ? (
+            <Settings
+              user={user}
+              onUserUpdate={handleUserUpdate}
+            />
+          ) : (
             <div className="dashboard-card rounded-xl border border-gray-100 bg-white p-8 shadow-sm">
               <h3 className="text-lg font-semibold text-[#10243E]">
                 {activePage}

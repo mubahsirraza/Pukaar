@@ -9,9 +9,11 @@ const {
   register,
   login,
   getMe,
+  updateProfile,
+  changePassword,
 } = require("../controllers/authController");
 
-const { protect } = require("../middleware/authMiddleware");
+const { protect, authorize } = require("../middleware/authMiddleware");
 const { rateLimit } = require("express-rate-limit");
 const { validateRequest } = require("../middleware/validationMiddleware");
 
@@ -83,7 +85,23 @@ router.post(
   login
 );
 
-// Protected route
+// Protected routes
 router.get("/me", protect, getMe);
+
+// Admin profile management
+router.patch(
+  "/profile",
+  protect,
+  authorize("ADMIN"),
+  updateProfile
+);
+
+// Admin password management
+router.patch(
+  "/change-password",
+  protect,
+  authorize("ADMIN"),
+  changePassword
+);
 
 module.exports = router;
